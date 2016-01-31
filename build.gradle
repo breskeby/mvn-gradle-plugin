@@ -5,9 +5,69 @@ repositories {
     jcenter()
 }
 
+sourceSets {
+    integTest {
+        compileClasspath += main.output + test.output
+        runtimeClasspath += main.output + test.output
+    }
+}
+
+configurations {
+    integTestCompile.extendsFrom testCompile
+    integTestRuntime.extendsFrom testRuntime
+}
+
+
+// Workaround for known ordering problem.
+// To get integtest working correctly in gradleTestKit() must be added before tooling api jar.
+//
+gradle.taskGraph.whenReady { graph ->
+    if(graph.hasTask(":idea")) {
+        dependencies {
+            compile gradleTestKit()
+        }
+    }
+}
+
 dependencies {
     compile localGroovy()
-	compile gradleApi()
-    testCompile 'org.spockframework:spock-core:1.0-groovy-2.4'
-    testCompile 'junit:junit:4.12'
+    compile gradleApi()
+    testCompile ('org.spockframework:spock-core:1.0-groovy-2.4') {
+        exclude module: 'groovy-all'
+    }
+    integTestCompile gradleTestKit()
 }
+
+
+task createClasspathManifest {
+    def outputDir = file("$buildDir/$name")
+
+    inputs.files sourceSets.main.runtimeClasspath
+    outputs.dir outputDir
+
+    doLast {
+        outputDir.mkdirs()
+        file("$outputDir/plugin-classpath.txt").text = sourceSets.main.runtimeClasspath.join("\n")
+    }
+}
+
+// Add the classpath file to the test runtime classpath
+dependencies {
+    integTestRuntime files(createClasspathManifest)
+}
+
+idea {
+    module {
+        testSourceDirs += sourceSets.integTest.groovy.srcDirs
+        testSourceDirs += sourceSets.integTest.resources.srcDirs
+        scopes.TEST.plus.add(configurations.integTestCompile)
+        scopes.TEST.plus.add(configurations.integTestRuntime)
+    }
+}
+
+task integTest(type:Test){
+    classpath = sourceSets.integTest.runtimeClasspath
+    testClassesDir = sourceSets.integTest.output.classesDir
+}
+
+
